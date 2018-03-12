@@ -30,7 +30,7 @@ func New(path *string) *Cfg {
 	viper.SetDefault("listen.port", "1081")
 	viper.SetDefault("listen.ssl", false)
 	viper.SetDefault("log.path", "/var/log/pinger.log")
-	viper.SetDefault("log.debug", false)
+	viper.SetDefault("log.debug", true)
 	viper.SetDefault("pinger.default-probes", 3)
 
 	c.ListenIp = viper.GetString("listen.ip")

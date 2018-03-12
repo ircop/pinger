@@ -24,8 +24,9 @@ func main() {
 	flag.Parse()
 
 	logger.Debug("Reading config file '%s'...", *configPath)
-	//cfg := ccfg.New(configPath)
 	cfg = ccfg.New(configPath)
+	logger.SetPath(cfg.LogPath)
+	logger.SetDebug(cfg.LogDebug)
 
 
 	proto := "http"
