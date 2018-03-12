@@ -43,3 +43,6 @@ where:
 
 ![](https://i.imgur.com/gxIJtmX.png)
 
+
+## 4) todo: store hosts with parameters in file
+
