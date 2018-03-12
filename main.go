@@ -5,15 +5,13 @@ import (
 	"./logger"
 	"./ccfg"
 	"./pinger"
+	"./hostpool"
 	"net"
 	"fmt"
 	"log"
 	"net/http"
 	"github.com/gorilla/mux"
 	"errors"
-	//"golang.org/x/net/icmp"
-	//"golang.org/x/net/ipv4"
-	//"os"
 	"strconv"
 	"strings"
 	"encoding/json"
@@ -46,6 +44,8 @@ func main() {
 	router.HandleFunc("/", Dummy)
 	router.HandleFunc("/ping-now", PingNow)
 	router.HandleFunc("/ping-api", PingApi)
+	router.HandleFunc("/store-host", StoreHost)
+	router.HandleFunc("/remove-host", RemoveHost)
 	router.Use(Middleware)
 
 	pinger.Pinger.Init()
@@ -54,6 +54,85 @@ func main() {
 	} else {
 		log.Fatal(http.Serve(listener, router))
 	}
+}
+
+func RemoveHost(w http.ResponseWriter, r *http.Request) {
+	params := GetParams(r)
+	hostParam, ok := params["host"]
+	if !ok {
+		ReturnError(w,r,"Missing 'host' parameter", http.StatusBadRequest)
+		return
+	}
+
+	if host, ok := hostpool.Pool.Hosts.Load(hostParam); ok {
+		logger.Debug("Removing host '%s' from pool", host)
+		fmt.Fprintf(w, `{"ok":true}`)
+		return
+	} else {
+		ReturnError(w,r, "Host not found", http.StatusBadRequest)
+		return
+	}
+}
+
+func StoreHost(w http.ResponseWriter, r *http.Request) {
+	params := GetParams(r)
+	host, ok := params["host"]
+	if !ok {
+		ReturnError(w,r,"Missing 'host' parameter", http.StatusBadRequest)
+		return
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		ReturnError(w,r,fmt.Sprintf("Cannot parpse '%s' into IP address", host), http.StatusBadRequest)
+		return
+	}
+
+	probesStr, ok := params["probes"]
+	probes := cfg.DefaultProbes
+	if ok {
+		p, err := strconv.ParseInt(probesStr, 10, 32)
+		if err != nil {
+			ReturnError(w,r,"Cannot parse 'probes', not integer?", http.StatusBadRequest)
+			return
+		}
+		probes = int(p)
+	}
+
+	intervalStr, ok := params["interval"]
+	if !ok {
+		ReturnError(w,r,"Missing 'interval' parameter", http.StatusBadRequest)
+		return
+	}
+	i, err := strconv.ParseInt(intervalStr, 10, 32)
+	if err != nil {
+		ReturnError(w,r,fmt.Sprintf("Cannot parse '%s' into interval integer", intervalStr), http.StatusBadRequest)
+		return
+	}
+	if i < 30 {
+		ReturnError(w,r,fmt.Sprintf("Minimal interval is 30 sec, %d given", i), http.StatusBadRequest)
+		return
+	}
+	interval := i
+
+	timeout := cfg.DefaultTimeout
+	if toutStr, ok := params["timeout"]; ok {
+		t, err := strconv.ParseInt(toutStr, 10, 64)
+		if err != nil {
+			ReturnError(w,r, fmt.Sprintf("Cannot parse interval '%s' to integer", toutStr), http.StatusBadRequest)
+			return
+		}
+		timeout = t
+	}
+
+	err = hostpool.Pool.AddHost(host, probes, interval, timeout, cfg.ResultUrl)
+	if err != nil {
+		ReturnError(w,r,fmt.Sprintf("Failed to add host: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprintf(w, `{"ok":true}`)
+	return
+	// need: host ; intervalSec ; timeout
 }
 
 func PingNow(w http.ResponseWriter, r *http.Request) {
@@ -67,8 +146,7 @@ func Ping(w http.ResponseWriter, r *http.Request, pingType string) {
 	params := GetParams(r)
 	host, ok := params["host"]
 	if !ok {
-		http.Error(w, "Missing host", http.StatusBadRequest)
-		logger.Err("[web]: missing host parameter (%s)", r.URL)
+		ReturnError(w, r,"Missing host parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -76,8 +154,7 @@ func Ping(w http.ResponseWriter, r *http.Request, pingType string) {
 	if probesStr, ok := params["probes"]; ok {
 		p, err := strconv.ParseInt(probesStr, 10, 32)
 		if err != nil {
-			http.Error(w, "Cannot parse 'probes'", http.StatusBadRequest)
-			logger.Err("[web]: Cannot parse 'probes' (%s)", http.StatusBadRequest, r.URL)
+			ReturnError(w, r,"Cannot parse 'probes'", http.StatusBadRequest)
 			return
 		}
 		probes = int(p)
@@ -86,14 +163,12 @@ func Ping(w http.ResponseWriter, r *http.Request, pingType string) {
 	if "now" == pingType {
 		result, err := pinger.Pinger.PingNow(host, probes)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Internal error: %s", err.Error()), http.StatusInternalServerError)
-			logger.Err("[web]: Ping : %s (%s)", err.Error(), r.URL)
+			ReturnError(w, r, fmt.Sprintf("Ping : %s (%s)", err.Error()), http.StatusInternalServerError)
 			return
 		}
 		bytes, e := json.Marshal(result)
 		if e != nil {
-			http.Error(w, fmt.Sprintf("Internal error: %s", e.Error()), http.StatusInternalServerError)
-			logger.Err("[web]: Cannot marshal result: %s", e.Error())
+			ReturnError(w, r, fmt.Sprintf("Internal error: %s", e.Error()), http.StatusInternalServerError)
 			return
 		}
 
@@ -101,7 +176,7 @@ func Ping(w http.ResponseWriter, r *http.Request, pingType string) {
 		return
 	} else if "api" == pingType {
 		if "" == cfg.ResultUrl {
-			http.Error(w, "Missing result.api-url in config", http.StatusInternalServerError)
+			ReturnError(w, r, "Missing result.api-url in config", http.StatusInternalServerError)
 			return
 		}
 
@@ -114,6 +189,12 @@ func Ping(w http.ResponseWriter, r *http.Request, pingType string) {
 func Dummy(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 	w.Write([]byte("Dummy answer"))
+}
+
+func ReturnError(w http.ResponseWriter, r *http.Request, err string, status int) {
+	http.Error(w, err, status)
+	logger.Err("[web]: Error: %s (%s)", err, r.URL)
+	return
 }
 
 func GetParams(r *http.Request) map[string]string {

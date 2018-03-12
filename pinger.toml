@@ -8,4 +8,6 @@ debug = false
 path = "/var/log/pinger.log"
 
 [pinger]
+default-timeout = 1
+default-probes = 3
 result-url = "http://10.10.10.6/pingresult?host={host}&alive={alive}&rtt-ns={ns}&rtt-ms={ms}"

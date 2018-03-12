@@ -13,6 +13,8 @@ type Cfg struct {
 	LogPath			string
 	LogDebug		bool
 	ResultUrl		string
+	DefaultProbes	int
+	DefaultTimeout	int64
 }
 
 func New(path *string) *Cfg {
@@ -29,6 +31,7 @@ func New(path *string) *Cfg {
 	viper.SetDefault("listen.ssl", false)
 	viper.SetDefault("log.path", "/var/log/pinger.log")
 	viper.SetDefault("log.debug", false)
+	viper.SetDefault("pinger.default-probes", 3)
 
 	c.ListenIp = viper.GetString("listen.ip")
 	c.ListenPort = viper.GetString("listen.port")
@@ -40,6 +43,8 @@ func New(path *string) *Cfg {
 	c.LogDebug = viper.GetBool("log.debug")
 
 	c.ResultUrl = viper.GetString("pinger.result-url")
+	c.DefaultProbes = viper.GetInt("pinger.default-probes")
+	c.DefaultTimeout = viper.GetInt64("pinger.default-timeout")
 
 	// if ssl is enabled, cert & key must exist
 	if( c.Ssl ) {
