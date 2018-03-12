@@ -31,6 +31,7 @@ func (p *Hostpool) AddHost(ip string, probes int, interval int64, timeout int64,
 	//if interval <  30 {
 	//	return errors.New(fmt.Sprintf("Interval should be 30+ seconds, %d given", interval))
 	//}
+
 	netip := net.ParseIP(ip)
 	if netip == nil {
 		return errors.New(fmt.Sprintf("Cannot parse ip '%s'", netip))

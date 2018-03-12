@@ -66,8 +66,9 @@ func RemoveHost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if host, ok := hostpool.Pool.Hosts.Load(hostParam); ok {
-		logger.Debug("Removing host '%s' from pool", host)
+		logger.Debug("Removing host '%s' from pool", hostParam)
 		fmt.Fprintf(w, `{"ok":true}`)
+		host.(*hostpool.Host).Stop()
 		return
 	} else {
 		ReturnError(w,r, "Host not found", http.StatusBadRequest)

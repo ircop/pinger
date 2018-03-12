@@ -4,7 +4,7 @@ port = 8001
 ssl = false
 
 [log]
-debug = false
+debug = true
 path = "/var/log/pinger.log"
 
 [pinger]
