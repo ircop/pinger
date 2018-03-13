@@ -1,26 +1,28 @@
 package pinger
 
 import (
-	"../logger"
-	"golang.org/x/net/icmp"
-	"sync"
-	"net"
-	"fmt"
-	"errors"
-	"golang.org/x/net/ipv4"
-	"strings"
 	"../httpclient"
+	"../logger"
+	"fmt"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
+	"net"
 	"net/http"
+	"strings"
+	"sync"
 )
 
+// PingDaemon is a global and unique struct for our pinger
 type PingDaemon struct {
-	Listener		*icmp.PacketConn
-	ListenerLock	sync.Mutex
-	Jobs			sync.Map
+	Listener     *icmp.PacketConn
+	ListenerLock sync.Mutex
+	Jobs         sync.Map
 }
 
+// Pinger is PingDaemon instance
 var Pinger PingDaemon
 
+// Init - initializing pinger daemon; starting listener
 func (p *PingDaemon) Init() error {
 	logger.Debug("Starting pinger instance")
 
@@ -36,6 +38,7 @@ func (p *PingDaemon) Init() error {
 	return nil
 }
 
+// PingNow - pings host and returns result without any goroutines
 func (p *PingDaemon) PingNow(host string, probes int) (*PingResult, error) {
 	// find valid ip
 	ip := net.ParseIP(host)
@@ -43,16 +46,16 @@ func (p *PingDaemon) PingNow(host string, probes int) (*PingResult, error) {
 		ips, err := net.LookupIP(host)
 		if err != nil || len(ips) == 0 {
 			logger.Err("'%s' is not ip, but also cannot resolve it with dns.", host)
-			return nil, errors.New(fmt.Sprintf("'%s' is not ip, but also cannot resolve it with dns.", host))
-		} else {
-			ip = ips[0]
+			return nil, fmt.Errorf("'%s' is not ip, but also cannot resolve it with dns", host)
 		}
+
+		ip = ips[0]
 	}
 
 	// check if there is no such running job
 	if _, running := p.Jobs.Load(ip.String()); running {
 		logger.Err("Ping job for '%s' is already running.", ip.String())
-		return nil, errors.New(fmt.Sprintf("Ping job for '%s' is already running.", ip.String()))
+		return nil, fmt.Errorf("Ping job for '%s' is already running", ip.String())
 	}
 
 	job := NewJob(ip.String())
@@ -62,7 +65,8 @@ func (p *PingDaemon) PingNow(host string, probes int) (*PingResult, error) {
 	return result, nil
 }
 
-func (p *PingDaemon) PingResultUrl(host string, probes int, url string) {
+// PingResultURL - pings host in goroutine and sends result to result URL
+func (p *PingDaemon) PingResultURL(host string, probes int, url string) {
 	// find valid ip
 	ip := net.ParseIP(host)
 	if ip == nil {
@@ -70,9 +74,8 @@ func (p *PingDaemon) PingResultUrl(host string, probes int, url string) {
 		if err != nil || len(ips) == 0 {
 			logger.Err("'%s' is not ip, but also cannot resolve it with dns.", host)
 			return
-		} else {
-			ip = ips[0]
 		}
+		ip = ips[0]
 	}
 
 	// check if there is no such running job
@@ -108,9 +111,6 @@ func (p *PingDaemon) PingResultUrl(host string, probes int, url string) {
 		logger.Err("Error requesting api: %s", err.Error())
 		return
 	}
-
-
-	return
 }
 
 func (p *PingDaemon) listen() {

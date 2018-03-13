@@ -1,20 +1,21 @@
 package main
 
 import (
-	"flag"
-	"./logger"
 	"./ccfg"
-	"./pinger"
 	"./hostpool"
-	"net"
-	"fmt"
-	"log"
-	"net/http"
-	"github.com/gorilla/mux"
+	"./logger"
+	"./pinger"
+	"encoding/json"
 	"errors"
+	"flag"
+	"fmt"
+	"github.com/gorilla/mux"
+	"log"
+	"net"
+	"net/http"
 	"strconv"
 	"strings"
-	"encoding/json"
+	"io"
 )
 
 var cfg *ccfg.Cfg
@@ -28,28 +29,30 @@ func main() {
 	logger.SetPath(cfg.LogPath)
 	logger.SetDebug(cfg.LogDebug)
 
-
 	proto := "http"
 	if cfg.Ssl {
 		proto = "https"
 	}
 
-	logger.Log("Listening on %s://%s:%s", proto, cfg.ListenIp, cfg.ListenPort)
-	listener, err := net.Listen("tcp4", fmt.Sprintf("%s:%s", cfg.ListenIp, cfg.ListenPort))
+	logger.Log("Listening on %s://%s:%s", proto, cfg.ListenIP, cfg.ListenPort)
+	listener, err := net.Listen("tcp4", fmt.Sprintf("%s:%s", cfg.ListenIP, cfg.ListenPort))
 	if err != nil {
 		panic(err)
 	}
 
 	// Serve http(s)
 	router := mux.NewRouter().StrictSlash(true)
-	router.HandleFunc("/", Dummy)
 	router.HandleFunc("/ping-now", PingNow)
-	router.HandleFunc("/ping-api", PingApi)
+	router.HandleFunc("/ping-api", PingAPI)
 	router.HandleFunc("/store-host", StoreHost)
 	router.HandleFunc("/remove-host", RemoveHost)
+	router.HandleFunc("/dump-hosts", DumpHosts)
 	router.Use(Middleware)
 
-	pinger.Pinger.Init()
+	if err := pinger.Pinger.Init(); err != nil {
+		logger.Debug("Cannot initialize pinger: %s", err.Error())
+		return
+	}
 	if cfg.Ssl {
 		log.Fatal(http.ServeTLS(listener, router, cfg.SslCert, cfg.SslKey))
 	} else {
@@ -57,11 +60,21 @@ func main() {
 	}
 }
 
+/*
+DumpHosts Output all in-memory hosts
+ */
+func DumpHosts(w http.ResponseWriter, r *http.Request) {
+	//
+}
+
+/*
+RemoveHost removing host from pool
+ */
 func RemoveHost(w http.ResponseWriter, r *http.Request) {
 	params := GetParams(r)
 	hostParam, ok := params["host"]
 	if !ok {
-		ReturnError(w,r,"Missing 'host' parameter", http.StatusBadRequest)
+		ReturnError(w, r, "Missing 'host' parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -70,85 +83,91 @@ func RemoveHost(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"ok":true}`)
 		host.(*hostpool.Host).Stop()
 		return
-	} else {
-		ReturnError(w,r, "Host not found", http.StatusBadRequest)
-		return
 	}
+
+	ReturnError(w, r, "Host not found", http.StatusBadRequest)
 }
 
+/*
+StoreHost stores host into pool
+ */
 func StoreHost(w http.ResponseWriter, r *http.Request) {
 	params := GetParams(r)
-	host, ok := params["host"]
-	if !ok {
-		ReturnError(w,r,"Missing 'host' parameter", http.StatusBadRequest)
+	err := CheckParams(params, []string{"host", "interval"})
+	if err != nil {
+		ReturnError(w, r, err.Error(), http.StatusBadRequest)
 		return
 	}
-	ip := net.ParseIP(host)
+
+	ip := net.ParseIP(params["host"])
 	if ip == nil {
-		ReturnError(w,r,fmt.Sprintf("Cannot parpse '%s' into IP address", host), http.StatusBadRequest)
+		ReturnError(w, r, fmt.Sprintf("Cannot parpse '%s' into IP address", params["host"]), http.StatusBadRequest)
 		return
 	}
 
 	probesStr, ok := params["probes"]
 	probes := cfg.DefaultProbes
 	if ok {
-		p, err := strconv.ParseInt(probesStr, 10, 32)
-		if err != nil {
-			ReturnError(w,r,"Cannot parse 'probes', not integer?", http.StatusBadRequest)
+		p, e := strconv.ParseInt(probesStr, 10, 32)
+		if e != nil {
+			ReturnError(w, r, "Cannot parse 'probes', not integer?", http.StatusBadRequest)
 			return
 		}
 		probes = int(p)
 	}
 
-	intervalStr, ok := params["interval"]
-	if !ok {
-		ReturnError(w,r,"Missing 'interval' parameter", http.StatusBadRequest)
-		return
-	}
-	i, err := strconv.ParseInt(intervalStr, 10, 32)
-	if err != nil {
-		ReturnError(w,r,fmt.Sprintf("Cannot parse '%s' into interval integer", intervalStr), http.StatusBadRequest)
+	i, e := strconv.ParseInt(params["interval"], 10, 32)
+	if e != nil {
+		ReturnError(w, r, fmt.Sprintf("Cannot parse '%s' into interval integer", params["interval"]), http.StatusBadRequest)
 		return
 	}
 	if i < 30 {
-		ReturnError(w,r,fmt.Sprintf("Minimal interval is 30 sec, %d given", i), http.StatusBadRequest)
+		ReturnError(w, r, fmt.Sprintf("Minimal interval is 30 sec, %d given", i), http.StatusBadRequest)
 		return
 	}
 	interval := i
 
 	timeout := cfg.DefaultTimeout
 	if toutStr, ok := params["timeout"]; ok {
-		t, err := strconv.ParseInt(toutStr, 10, 64)
-		if err != nil {
-			ReturnError(w,r, fmt.Sprintf("Cannot parse interval '%s' to integer", toutStr), http.StatusBadRequest)
+		t, e := strconv.ParseInt(toutStr, 10, 64)
+		if e != nil {
+			ReturnError(w, r, fmt.Sprintf("Cannot parse interval '%s' to integer", toutStr), http.StatusBadRequest)
 			return
 		}
 		timeout = t
 	}
 
-	err = hostpool.Pool.AddHost(host, probes, interval, timeout, cfg.ResultUrl)
+	err = hostpool.Pool.AddHost(params["host"], probes, interval, timeout, cfg.ResultURL)
 	if err != nil {
-		ReturnError(w,r,fmt.Sprintf("Failed to add host: %s", err.Error()), http.StatusInternalServerError)
+		ReturnError(w, r, fmt.Sprintf("Failed to add host: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	fmt.Fprintf(w, `{"ok":true}`)
-	return
 	// need: host ; intervalSec ; timeout
 }
 
+/*
+PingNow Pinging host instantly ; blocks http stream
+ */
 func PingNow(w http.ResponseWriter, r *http.Request) {
-	Ping(w,r,"now")
+	Ping(w, r, "now")
 }
-func PingApi(w http.ResponseWriter, r *http.Request) {
-	Ping(w,r,"api")
+/*
+PingAPI Pinging host in background; after finish - make api call
+ */
+func PingAPI(w http.ResponseWriter, r *http.Request) {
+	Ping(w, r, "api")
 }
 
-func Ping(w http.ResponseWriter, r *http.Request, pingType string) {
+/*
+Ping calls ping now or ping api
+ */
+func Ping(w io.Writer, r *http.Request, pingType string) {
 	params := GetParams(r)
 	host, ok := params["host"]
 	if !ok {
-		ReturnError(w, r,"Missing host parameter", http.StatusBadRequest)
+		ReturnError(w, r, "Missing host parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -156,7 +175,7 @@ func Ping(w http.ResponseWriter, r *http.Request, pingType string) {
 	if probesStr, ok := params["probes"]; ok {
 		p, err := strconv.ParseInt(probesStr, 10, 32)
 		if err != nil {
-			ReturnError(w, r,"Cannot parse 'probes'", http.StatusBadRequest)
+			ReturnError(w, r, "Cannot parse 'probes'", http.StatusBadRequest)
 			return
 		}
 		probes = int(p)
@@ -165,7 +184,7 @@ func Ping(w http.ResponseWriter, r *http.Request, pingType string) {
 	if "now" == pingType {
 		result, err := pinger.Pinger.PingNow(host, probes)
 		if err != nil {
-			ReturnError(w, r, fmt.Sprintf("Ping : %s (%s)", err.Error()), http.StatusInternalServerError)
+			ReturnError(w, r, fmt.Sprintf("Ping : %s", err.Error()), http.StatusInternalServerError)
 			return
 		}
 		bytes, e := json.Marshal(result)
@@ -177,41 +196,58 @@ func Ping(w http.ResponseWriter, r *http.Request, pingType string) {
 		fmt.Fprintf(w, "%s", string(bytes))
 		return
 	} else if "api" == pingType {
-		if "" == cfg.ResultUrl {
+		if "" == cfg.ResultURL {
 			ReturnError(w, r, "Missing result.api-url in config", http.StatusInternalServerError)
 			return
 		}
 
-		go pinger.Pinger.PingResultUrl(host, probes, cfg.ResultUrl)
+		go pinger.Pinger.PingResultURL(host, probes, cfg.ResultURL)
 		fmt.Fprintf(w, `{"ok":true}`)
 		return
 	}
 }
 
-func Dummy(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(200)
-	w.Write([]byte("Dummy answer"))
-}
-
-func ReturnError(w http.ResponseWriter, r *http.Request, err string, status int) {
-	http.Error(w, err, status)
+/*
+ReturnError returns an http error and logs it into error log
+ */
+//func ReturnError(w http.ResponseWriter, r *http.Request, err string, status int) {
+func ReturnError(w io.Writer, r *http.Request, err string, status int) {
+	//http.Error(w, err, status)
+	fmt.Fprintf(w, fmt.Sprintf(`{"ok":false, "message":"%s"}`, err) )
 	logger.Err("[web]: Error: %s (%s)", err, r.URL)
-	return
 }
 
+/*
+GetParams parses query string into parameters map
+ */
 func GetParams(r *http.Request) map[string]string {
 	params := make(map[string]string)
 	for param, val := range r.URL.Query() {
-		param := strings.ToLower(param)
+		p := strings.ToLower(param)
 		v := strings.Join(val, "")
 		if len(v) > 0 {
-			params[param] = v
+			params[p] = v
 		}
 	}
 
 	return params
 }
 
+/*
+CheckParams checking url parameters for set of required ones
+ */
+func CheckParams(params map[string]string, required []string) error {
+	for _, p := range required {
+		if _, exist := params[p]; !exist {
+			return fmt.Errorf("Missing parameter '%s'", p)
+		}
+	}
+	return nil
+}
+
+/*
+Middleware is router middleware func
+ */
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		defer func() {
@@ -231,6 +267,6 @@ func Middleware(next http.Handler) http.Handler {
 		}()
 
 		w.Header().Set("Content-Type", "application/json")
-		next.ServeHTTP(w, req);
+		next.ServeHTTP(w, req)
 	})
 }

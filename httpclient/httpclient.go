@@ -6,26 +6,31 @@ import (
 	"time"
 )
 
-type HttpConfig struct {
-	ConnectTimeout		time.Duration
-	RwTimeout			time.Duration
+// HTTPConfig is struct for handling http client configuration
+type HTTPConfig struct {
+	ConnectTimeout time.Duration
+	RwTimeout      time.Duration
 }
 
-func TimeoutDialer(config *HttpConfig) func (net, addr string) (c net.Conn, err error) {
+// TimeoutDialer returns net.Conn with timeout set
+func TimeoutDialer(config *HTTPConfig) func(net, addr string) (c net.Conn, err error) {
 	return func(netw, addr string) (net.Conn, error) {
 		conn, err := net.DialTimeout(netw, addr, config.ConnectTimeout)
 		if err != nil {
 			return nil, err
 		}
-		conn.SetDeadline(time.Now().Add(config.RwTimeout))
+		if err := conn.SetDeadline(time.Now().Add(config.RwTimeout)); err != nil {
+			return nil, err
+		}
 		return conn, nil
 	}
 }
 
+// NewTimeoutClient returns custom http(s) client with timeouts set
 func NewTimeoutClient(args ...interface{}) *http.Client {
-	config := &HttpConfig{
+	config := &HTTPConfig{
 		ConnectTimeout: 1 * time.Second,
-		RwTimeout: 1 * time.Second,
+		RwTimeout:      1 * time.Second,
 	}
 
 	if len(args) == 1 {
