@@ -12,4 +12,4 @@ default-interval = 120
 default-probes = 3
 updates-interval = 60
 save-interval = 180
-save-path = "/home/ipnoc/pinger/hosts.json"
+save-path = "/etc/pinger/hosts.json"
