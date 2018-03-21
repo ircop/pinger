@@ -9,6 +9,7 @@ import (
 
 type logger struct {
 	DebugEnabled bool
+	DebugLock    bool
 	LogPath      string
 	LogFile      *os.File
 }
@@ -17,11 +18,13 @@ var mlog = logger{
 	DebugEnabled: true,
 	LogPath:      "",
 	LogFile:      nil,
+	//DebugLock:	  true,
+	DebugLock: false,
 }
 
 /*
 Write - write log
- */
+*/
 func (l *logger) Write(format string, args ...interface{}) {
 	t := time.Now()
 	tm := fmt.Sprintf("[%d.%02d.%02d %02d:%02d:%02d]: ", t.Day(), t.Month(), t.Year(), t.Hour(), t.Minute(), t.Second())
@@ -34,7 +37,7 @@ func (l *logger) Write(format string, args ...interface{}) {
 
 /*
 WriteAsIs - write log without any formatting
- */
+*/
 func (l *logger) WriteAsIs(format string, args ...interface{}) {
 	if mlog.LogFile != nil {
 		//fmt.Printf(format, args...)
@@ -44,14 +47,14 @@ func (l *logger) WriteAsIs(format string, args ...interface{}) {
 
 /*
 Log - normal log (info)
- */
+*/
 func Log(format string, args ...interface{}) {
 	mlog.Write("[INFO]: "+format, args...)
 }
 
 /*
 DebugAsIs - debug without any formatting
- */
+*/
 func DebugAsIs(format string, args ...interface{}) {
 	if !mlog.DebugEnabled {
 		return
@@ -61,7 +64,7 @@ func DebugAsIs(format string, args ...interface{}) {
 
 /*
 Debug - write in debug mode
- */
+*/
 func Debug(format string, args ...interface{}) {
 	if !mlog.DebugEnabled {
 		return
@@ -71,21 +74,30 @@ func Debug(format string, args ...interface{}) {
 
 /*
 Err - write error
- */
+*/
 func Err(format string, args ...interface{}) {
 	mlog.Write("[ERROR]: "+format, args...)
 }
 
 /*
-SetDebug - enable/disable debug
+DebugLock - dedicated debug for locks/unlocks
  */
+func DebugLock(format string, args ...interface{}) {
+	if mlog.DebugLock {
+		mlog.Write("[DEBUG:LOCK]: "+format, args...)
+	}
+}
+
+/*
+SetDebug - enable/disable debug
+*/
 func SetDebug(val bool) {
 	mlog.DebugEnabled = val
 }
 
 /*
 SetPath - set logfile path
- */
+*/
 func SetPath(path string) {
 	mlog.LogPath = path
 

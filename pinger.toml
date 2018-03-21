@@ -8,6 +8,8 @@ debug = true
 path = "/var/log/pinger.log"
 
 [pinger]
-default-timeout = 1
+default-interval = 120
 default-probes = 3
-result-url = "http://10.10.10.6/pingresult?host={host}&alive={alive}&rtt-ns={ns}&rtt-ms={ms}"
+updates-interval = 60
+save-interval = 180
+save-path = "/home/ipnoc/pinger/hosts.json"

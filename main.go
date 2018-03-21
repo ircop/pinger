@@ -1,21 +1,25 @@
 package main
 
 import (
-	"./ccfg"
-	"./hostpool"
-	"./logger"
-	"./pinger"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"github.com/gorilla/mux"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"pinger/ccfg"
+	"pinger/logger"
+	"pinger/pinger"
+	"pinger/pools"
+	"pinger/web"
+	"pinger/notify"
 	"strconv"
 	"strings"
-	"io"
+	"math/rand"
+	"time"
 )
 
 var cfg *ccfg.Cfg
@@ -34,11 +38,20 @@ func main() {
 		proto = "https"
 	}
 
+	// Init random sequence
+	rand.Seed(time.Now().UTC().UnixNano())
+	// Init notify buffer
+	go notify.Buffer.Start(cfg.UpdatesInterval)
+	// Init global pools
+	pools.TopicPool.Init(cfg.SavePath, cfg.SaveInterval, cfg.DefaultProbes, cfg.DefaultInterval)
+
 	logger.Log("Listening on %s://%s:%s", proto, cfg.ListenIP, cfg.ListenPort)
 	listener, err := net.Listen("tcp4", fmt.Sprintf("%s:%s", cfg.ListenIP, cfg.ListenPort))
 	if err != nil {
 		panic(err)
 	}
+
+	Web := web.NewWeb(cfg.DefaultProbes, cfg.DefaultInterval, cfg.ResultURL)
 
 	// Serve http(s)
 	router := mux.NewRouter().StrictSlash(true)
@@ -47,6 +60,8 @@ func main() {
 	router.HandleFunc("/store-host", StoreHost)
 	router.HandleFunc("/remove-host", RemoveHost)
 	router.HandleFunc("/dump-hosts", DumpHosts)
+	router.HandleFunc("/get-or-store", Web.GetOrStore)
+	router.HandleFunc("/store", Web.Store)
 	router.Use(Middleware)
 
 	if err := pinger.Pinger.Init(); err != nil {
@@ -62,14 +77,14 @@ func main() {
 
 /*
 DumpHosts Output all in-memory hosts
- */
+*/
 func DumpHosts(w http.ResponseWriter, r *http.Request) {
 	//
 }
 
 /*
 RemoveHost removing host from pool
- */
+*/
 func RemoveHost(w http.ResponseWriter, r *http.Request) {
 	params := GetParams(r)
 	hostParam, ok := params["host"]
@@ -78,10 +93,10 @@ func RemoveHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if host, ok := hostpool.Pool.Hosts.Load(hostParam); ok {
+	if host, ok := pools.PingPool.Hosts.Load(hostParam); ok {
 		logger.Debug("Removing host '%s' from pool", hostParam)
 		fmt.Fprintf(w, `{"ok":true}`)
-		host.(*hostpool.Host).Stop()
+		host.(*pools.Host).Stop()
 		return
 	}
 
@@ -90,7 +105,7 @@ func RemoveHost(w http.ResponseWriter, r *http.Request) {
 
 /*
 StoreHost stores host into pool
- */
+*/
 func StoreHost(w http.ResponseWriter, r *http.Request) {
 	params := GetParams(r)
 	err := CheckParams(params, []string{"host", "interval"})
@@ -127,17 +142,7 @@ func StoreHost(w http.ResponseWriter, r *http.Request) {
 	}
 	interval := i
 
-	timeout := cfg.DefaultTimeout
-	if toutStr, ok := params["timeout"]; ok {
-		t, e := strconv.ParseInt(toutStr, 10, 64)
-		if e != nil {
-			ReturnError(w, r, fmt.Sprintf("Cannot parse interval '%s' to integer", toutStr), http.StatusBadRequest)
-			return
-		}
-		timeout = t
-	}
-
-	err = hostpool.Pool.AddHost(params["host"], probes, interval, timeout, cfg.ResultURL)
+	err = pools.PingPool.AddHost(params["host"], probes, interval, cfg.ResultURL)
 	if err != nil {
 		ReturnError(w, r, fmt.Sprintf("Failed to add host: %s", err.Error()), http.StatusInternalServerError)
 		return
@@ -149,20 +154,21 @@ func StoreHost(w http.ResponseWriter, r *http.Request) {
 
 /*
 PingNow Pinging host instantly ; blocks http stream
- */
+*/
 func PingNow(w http.ResponseWriter, r *http.Request) {
 	Ping(w, r, "now")
 }
+
 /*
 PingAPI Pinging host in background; after finish - make api call
- */
+*/
 func PingAPI(w http.ResponseWriter, r *http.Request) {
 	Ping(w, r, "api")
 }
 
 /*
 Ping calls ping now or ping api
- */
+*/
 func Ping(w io.Writer, r *http.Request, pingType string) {
 	params := GetParams(r)
 	host, ok := params["host"]
@@ -209,17 +215,17 @@ func Ping(w io.Writer, r *http.Request, pingType string) {
 
 /*
 ReturnError returns an http error and logs it into error log
- */
+*/
 //func ReturnError(w http.ResponseWriter, r *http.Request, err string, status int) {
 func ReturnError(w io.Writer, r *http.Request, err string, status int) {
 	//http.Error(w, err, status)
-	fmt.Fprintf(w, fmt.Sprintf(`{"ok":false, "message":"%s"}`, err) )
+	fmt.Fprintf(w, fmt.Sprintf(`{"ok":false, "message":"%s"}`, err))
 	logger.Err("[web]: Error: %s (%s)", err, r.URL)
 }
 
 /*
 GetParams parses query string into parameters map
- */
+*/
 func GetParams(r *http.Request) map[string]string {
 	params := make(map[string]string)
 	for param, val := range r.URL.Query() {
@@ -235,7 +241,7 @@ func GetParams(r *http.Request) map[string]string {
 
 /*
 CheckParams checking url parameters for set of required ones
- */
+*/
 func CheckParams(params map[string]string, required []string) error {
 	for _, p := range required {
 		if _, exist := params[p]; !exist {
@@ -247,7 +253,7 @@ func CheckParams(params map[string]string, required []string) error {
 
 /*
 Middleware is router middleware func
- */
+*/
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		defer func() {

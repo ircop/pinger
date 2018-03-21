@@ -1,13 +1,13 @@
 package pinger
 
 import (
-	"../httpclient"
-	"../logger"
 	"fmt"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"net"
 	"net/http"
+	"pinger/httpclient"
+	"pinger/logger"
 	"strings"
 	"sync"
 )
@@ -38,6 +38,22 @@ func (p *PingDaemon) Init() error {
 	return nil
 }
 
+// Ping - pinging host right now without any goroutines, return result
+//func (p *PingDaemon) Ping(IP net.IP, probes int) (*PingResult, error) {
+func (p *PingDaemon) Ping(IP fmt.Stringer, probes int) (*PingResult, error) {
+	// check if there is no such running job
+	if _, running := p.Jobs.Load(IP.String()); running {
+		logger.Err("Ping job for '%s' is already running.", IP.String())
+		return nil, fmt.Errorf("Ping job for '%s' is already running", IP.String())
+	}
+
+	job := NewJob(IP.String())
+	p.Jobs.Store(IP.String(), job)
+	result := job.Run(probes)
+
+	return result, nil
+}
+
 // PingNow - pings host and returns result without any goroutines
 func (p *PingDaemon) PingNow(host string, probes int) (*PingResult, error) {
 	// find valid ip
@@ -51,9 +67,10 @@ func (p *PingDaemon) PingNow(host string, probes int) (*PingResult, error) {
 
 		ip = ips[0]
 	}
+	return p.Ping(ip, probes)
 
 	// check if there is no such running job
-	if _, running := p.Jobs.Load(ip.String()); running {
+	/*if _, running := p.Jobs.Load(ip.String()); running {
 		logger.Err("Ping job for '%s' is already running.", ip.String())
 		return nil, fmt.Errorf("Ping job for '%s' is already running", ip.String())
 	}
@@ -62,7 +79,7 @@ func (p *PingDaemon) PingNow(host string, probes int) (*PingResult, error) {
 	p.Jobs.Store(ip.String(), job)
 	result := job.Run(probes)
 
-	return result, nil
+	return result, nil*/
 }
 
 // PingResultURL - pings host in goroutine and sends result to result URL
@@ -89,6 +106,10 @@ func (p *PingDaemon) PingResultURL(host string, probes int, url string) {
 	result := job.Run(probes)
 
 	// form url
+	if "" == url {
+		// todo: other notifies?
+		return
+	}
 	url = strings.Replace(url, `{host}`, host, -1)
 	if result.Alive {
 		url = strings.Replace(url, `{alive}`, "true", -1)
@@ -115,7 +136,7 @@ func (p *PingDaemon) PingResultURL(host string, probes int, url string) {
 
 func (p *PingDaemon) listen() {
 	// todo: recover
-	readBuf := make([]byte, 1600)
+	readBuf := make([]byte, 1500)
 
 	for {
 		n, peer, err := p.Listener.ReadFrom(readBuf)
@@ -123,34 +144,44 @@ func (p *PingDaemon) listen() {
 			logger.Err("Error reading from buffer: %s", err.Error())
 			continue
 		}
-		host := peer.String()
-		if j, found := p.Jobs.Load(host); found {
+		//bytes := readBuf[:n]
+		copied := make([]byte, len(readBuf[:n]))
+		copy(copied, readBuf[:n])
+		go func(b []byte) {
+			//logger.Debug("Message from %s", peer.String())
+			host := peer.String()
+			if j, found := p.Jobs.Load(host); found {
 
-			parsed, parseErr := icmp.ParseMessage(1, readBuf[:n])
-			if parseErr != nil {
-				logger.Err("Error parsing icmp message: %s", parseErr.Error())
-				continue
-			}
+				parsed, parseErr := icmp.ParseMessage(1, b)
+				if parseErr != nil {
+					logger.Err("Error parsing icmp message: %s", parseErr.Error())
+					//continue
+					return
+				}
 
-			if parsed.Type != ipv4.ICMPTypeEchoReply {
-				// non-reply message
-				//logger.Debug("Non-Reply message from %s", host)
-				continue
-			}
-			//logger.Debug("Message from %s", host)
+				if parsed.Type != ipv4.ICMPTypeEchoReply {
+					// non-reply message
+					//logger.Debug("Non-Reply message from %s: %d; %+v", host, parsed.Type, parsed)
+					logger.Debug("Non-Reply message from %s: %d; %+v\nbytes: %+v\nper byte: 0: %+v, 1: %+v, 2: %+v, 3: %+v", host, parsed.Type, parsed, b, b[0],b[1],b[2],b[3])
+					//continue
+					return
+				}
+				//logger.Debug("Reply message from %s: %d; %+v", host, parsed.Type, parsed)
 
-			job := j.(*PingJob)
-			if !job.Done {
-				// parse body
-				if parsed.Body != nil && parsed.Body.Len(parsed.Type.Protocol()) != 0 {
-					// we need mutex to avoid writing to closed channel
-					job.ChanMx.Lock()
-					if !job.Done {
-						job.Reply <- parsed.Body.(*icmp.Echo).Seq
+				job := j.(*PingJob)
+				if !job.Done {
+					// parse body
+					if parsed.Body != nil && parsed.Body.Len(parsed.Type.Protocol()) != 0 {
+						// we need mutex to avoid writing to closed channel
+						job.ChanMx.Lock()
+						if !job.Done {
+							//job.Reply <- parsed.Body.(*icmp.Echo).Seq
+							job.Reply <- *parsed.Body.(*icmp.Echo)
+						}
+						job.ChanMx.Unlock()
 					}
-					job.ChanMx.Unlock()
 				}
 			}
-		}
+		}(copied)
 	}
 }
