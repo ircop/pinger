@@ -38,7 +38,6 @@ StartSaver - if config savepath and saveInterval are set, start "saver" vorker f
 func (p *DBPool) StartSaver() {
 	sec := p.SaveInterval
 	ticker := time.NewTicker(time.Duration(sec) * time.Second)
-
 	for {
 		select {
 		case <- ticker.C:
@@ -60,6 +59,7 @@ func (p *DBPool) Init(savePath string, saveInterval int64, defaultProbes int, de
 		contents, err := ioutil.ReadFile(p.SavePath)
 		if err != nil {
 			logger.Err("Cannot read saved hosts: %s", err.Error())
+			go p.StartSaver()
 			return
 		}
 
