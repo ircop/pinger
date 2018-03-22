@@ -60,7 +60,8 @@ func ParseTopics(topics map[string]interface{}, defProbes int, defInterval int64
 				logger.Err("Error parsing hosts in topic '%s': %s", topicName, err.Error())
 			} else {
 				for n := range hosts {
-					topic.Hosts.Store(hosts[n].IP.String(), hosts[n])
+					//topic.Hosts.Store(hosts[n].IP.String(), hosts[n])
+					topic.AddHost(hosts[n])
 				}
 				returnTopics = append(returnTopics, &topic)
 			}
