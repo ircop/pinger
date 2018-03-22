@@ -50,6 +50,7 @@ func (b *buffer) Start(interval int64) {
 			//logger.Debug("[buffer.Start]: <- ticker.C")
 			// todo: loop over all urls => hosts
 			b.Urls.Range(func(k, v interface{}) bool {							// url->results[ip->result]
+				//logger.Debug("[buffer.Start]: Update url: %s", k.(string))
 				url := k.(string)
 				//url := "https://w-tech.ip-home.net/pingupdate404"
 				values := make(map[string]bool)

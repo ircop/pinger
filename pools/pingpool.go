@@ -133,10 +133,8 @@ func (h *Host) Update(Interval int64, Probes int, URL string) {
 			logger.Err("Host.Update: Cannot add host '%s' to PingPool: %s", h.IP.String(), err.Error())
 		}
 	} else {
-		h.Lock("Update")
 		h.Probes = Probes
 		h.URL = URL
-		h.Unlock("Update")
 	}
 }
 

@@ -182,9 +182,6 @@ func (p *DBPool) GetOrStore(topics []*Topic, removeOld bool) map[string]map[stri
 		returnTopics[newTopic.Name] = p.CompareTopic(newTopic, topic.(*Topic), removeOld)
 	}
 
-	// todo: return map of hosts & topics
-	// todo: or just hosts?
-
 	TopicPool.Unlock()
 	return returnTopics
 }
