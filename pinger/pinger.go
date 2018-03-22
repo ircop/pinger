@@ -28,7 +28,9 @@ func (p *PingDaemon) Init() error {
 
 	// start listener
 	var err error
+	Pinger.ListenerLock.Lock()
 	Pinger.Listener, err = icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+	Pinger.ListenerLock.Unlock()
 	if err != nil {
 		return err
 	}
@@ -68,18 +70,6 @@ func (p *PingDaemon) PingNow(host string, probes int) (*PingResult, error) {
 		ip = ips[0]
 	}
 	return p.Ping(ip, probes)
-
-	// check if there is no such running job
-	/*if _, running := p.Jobs.Load(ip.String()); running {
-		logger.Err("Ping job for '%s' is already running.", ip.String())
-		return nil, fmt.Errorf("Ping job for '%s' is already running", ip.String())
-	}
-
-	job := NewJob(ip.String())
-	p.Jobs.Store(ip.String(), job)
-	result := job.Run(probes)
-
-	return result, nil*/
 }
 
 // PingResultURL - pings host in goroutine and sends result to result URL
