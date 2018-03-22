@@ -11,5 +11,5 @@ path = "/var/log/pinger.log"
 default-interval = 120
 default-probes = 3
 updates-interval = 60
-save-interval = 180
+save-interval = 30
 save-path = "/etc/pinger/hosts.json"

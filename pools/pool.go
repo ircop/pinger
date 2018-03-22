@@ -200,6 +200,16 @@ func (p *DBPool) CompareTopic(newTopic *Topic, oldTopic *Topic, removeOld bool) 
 	oldTopic.Lock()
 	defer oldTopic.Unlock()
 
+	if oldTopic.UpdateURL != newTopic.UpdateURL {
+		oldTopic.UpdateURL = newTopic.UpdateURL
+	}
+	if oldTopic.Interval != newTopic.Interval {
+		oldTopic.Interval = newTopic.Interval
+	}
+	if oldTopic.Probes != newTopic.Probes {
+		oldTopic.Probes = newTopic.Probes
+	}
+
 	newTopic.Hosts.Range(func(key, newHost interface{}) bool {
 		oldHost, exist := oldTopic.Hosts.Load(key.(string))
 		if exist {

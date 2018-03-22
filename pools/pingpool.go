@@ -119,11 +119,15 @@ func (h *Host) Run() {
 Update - update pingpool host struct in memory
  */
 func (h *Host) Update(Interval int64, Probes int, URL string) {
+	h.Lock()
+	defer h.Unlock()
 	logger.Debug("Updating host %s", h.IP.String())
 	if h.Finished {
 		return
 	}
-	if (time.Duration(Interval) * time.Second) != h.Interval {
+	//if (time.Duration(Interval) * time.Second) != h.Interval {
+	if (time.Duration(Interval) * time.Second) < h.Interval {
+	// todo: check if tere is several DBHosts with this ip. If one - change interval anyway, if several - use smallest.
 		// Re-Add host, because we cannot update timer when it's in use
 		if err := PingPool.AddHost(h.IP.String(), h.Probes, Interval, h.URL); err != nil {
 			logger.Err("Host.Update: Cannot add host '%s' to PingPool: %s", h.IP.String(), err.Error())

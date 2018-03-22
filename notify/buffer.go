@@ -47,6 +47,7 @@ func (b *buffer) Start(interval int64) {
 	for {
 		select {
 		case <- ticker.C:
+			//logger.Debug("[buffer.Start]: <- ticker.C")
 			// todo: loop over all urls => hosts
 			b.Urls.Range(func(k, v interface{}) bool {							// url->results[ip->result]
 				url := k.(string)
